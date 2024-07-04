@@ -17,42 +17,63 @@ import helpers.utils as utils
 
 
 def list_songs_from_spotify_playlist(sp, user, playlist):
+    """ Fetch all songs from the given Spotify playlist using pagination.
 
-    playlist_tracks = sp.user_playlist_tracks(
-        user, playlist, fields='items,uri,name,id', market='fr')
+    Args:
+        sp (spotipy.Spotify): Authorized Spotify client.
+        user (str): Spotify user ID.
+        playlist (str): Spotify playlist ID.
 
-    playlist_tracks = playlist_tracks['items']
+    Returns:
+        list of str: List of songs formatted with their names, artist names, 
+                     and Spotify URIs.
+    """
+    results = sp.user_playlist_tracks(
+        user, playlist, fields='items(track(name,uri,artists(name))),next', 
+        market='FR')
+    tracks = results['items']
     str_playlist = []
 
-    for track in playlist_tracks:
-        track = track['track']
-        artists = [i['name'] for i in track['artists']]
-        str_playlist.append(
-            track['name'] + ' ' + ' '.join(artists) + ' --spotify-id ' + track['uri'])
+    while results['next']:
+        results = sp.next(results)
+        tracks.extend(results['items'])
+
+    for item in tracks:
+        track = item['track']
+        artists = ' '.join(artist['name'] for artist in track['artists'])
+        track_info = f"{track['name']} {artists} --spotify-id {track['uri']}"
+        str_playlist.append(track_info)
+
     return str_playlist
 
 
 def main(args):
     logger.info('Start of program: download_songs.py...')
+
+
     config = dataloading.load_yaml(args.config)
     connection = dataloading.load_yaml(args.connection)
+    # Make destination directory if it does not exist
+    print(config['output_dir'])
+    os.makedirs(os.path.expanduser(config['output_dir']), exist_ok=True)
 
     sp = utils.get_auth_spotipy_obj(connection, 'playlist-modify-public')
-
+    
     # since the ytmdl is just a command line tool, we need to call it in the shell
     songs = list_songs_from_spotify_playlist(
         sp=sp, playlist=config['playlist'], user=connection['username'])
     
     songs = dataprocessing.remove_illegal_characters(songs)
-
     # disable local search
     songs = [i + ' --nolocal' for i in songs]
 
+
     songs = dataprocessing.adding_pre_and_post_str(
-        'ytmdl', '--output-dir ' + config['output_dir'], songs)
+        'ytmdl', '-q --output-dir ' + config['output_dir'], songs)
 
     for song in songs:
         os.system(song)
+
     logger.info('End of program: download_songs.py\n')
 
 
